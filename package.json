@@ -1,0 +1,21 @@
+{
+  "name": "ai-call-center-frontend",
+  "version": "1.0.0",
+  "description": "Real-time AI call center frontend",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "dev": "vite --host",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "keywords": ["ai", "call-center", "websocket", "audio"],
+  "author": "AI Call Center Team",
+  "license": "MIT"
+}
