@@ -115,3 +115,23 @@ func (s *Session) Close() error {
 	}
 	return nil
 }
+
+// MessageTypeFromString converts a string to MessageType
+func MessageTypeFromString(s string) MessageType {
+	switch s {
+	case "audio":
+		return MessageTypeAudio
+	case "text":
+		return MessageTypeText
+	case "control":
+		return MessageTypeControl
+	case "error":
+		return MessageTypeError
+	case "heartbeat":
+		return MessageTypeHeartbeat
+	case "session":
+		return MessageTypeSession
+	default:
+		return MessageTypeError
+	}
+}

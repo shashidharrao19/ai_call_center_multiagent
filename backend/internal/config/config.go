@@ -20,6 +20,21 @@ type Config struct {
 	// AI Engine configuration
 	AIEngineURL string
 	PythonPort  string
+	
+	// Gemini API configuration
+	GoogleAPIKey string
+	GeminiModel  string
+	
+	// MCP configuration
+	MCPServerURL string
+	
+	// Session configuration
+	SessionTimeout int
+	MaxSessions    int
+	
+	// Performance configuration
+	MaxConcurrentRequests int
+	RequestTimeout        int
 
 	// Audio configuration
 	AudioSampleRate int
@@ -48,6 +63,21 @@ func Load() *Config {
 		LogFormat:       getEnv("LOG_FORMAT", "json"),
 		AIEngineURL:     getEnv("AI_ENGINE_URL", "http://localhost:8000"),
 		PythonPort:      getEnv("PYTHON_PORT", "8000"),
+		
+		// Gemini API configuration
+		GoogleAPIKey: getEnv("GOOGLE_API_KEY", ""),
+		GeminiModel:  getEnv("GEMINI_MODEL", "models/gemini-2.0-flash-live-001"),
+		
+		// MCP configuration
+		MCPServerURL: getEnv("MCP_SERVER_URL", "http://localhost:8001"),
+		
+		// Session configuration
+		SessionTimeout: getEnvAsInt("SESSION_TIMEOUT", 3600),
+		MaxSessions:    getEnvAsInt("MAX_SESSIONS", 1000),
+		
+		// Performance configuration
+		MaxConcurrentRequests: getEnvAsInt("MAX_CONCURRENT_REQUESTS", 100),
+		RequestTimeout:        getEnvAsInt("REQUEST_TIMEOUT", 30),
 		AudioSampleRate: getEnvAsInt("AUDIO_SAMPLE_RATE", 24000),
 		AudioChannels:   getEnvAsInt("AUDIO_CHANNELS", 1),
 		AudioFormat:     getEnv("AUDIO_FORMAT", "PCM"),

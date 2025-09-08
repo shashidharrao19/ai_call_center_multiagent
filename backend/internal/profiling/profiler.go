@@ -2,11 +2,15 @@ package profiling
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"runtime"
+	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -41,6 +45,16 @@ type MetricsCollector struct {
 	AudioChunksProcessed int64
 	AudioProcessingLatency *LatencyHistogram
 	DroppedAudioChunks int64
+	
+	// AI Engine metrics
+	GeminiRequests int64
+	GeminiErrors   int64
+	GeminiLatency  *LatencyHistogram
+	
+	// MCP metrics
+	MCPCalls  int64
+	MCPErrors int64
+	MCPLatency *LatencyHistogram
 	
 	// System metrics
 	CPUUsage          float64
@@ -104,6 +118,8 @@ func NewProfiler(port string, enabled bool) *Profiler {
 			HandlerLatency:        NewLatencyHistogram(),
 			RPCLatency:            NewLatencyHistogram(),
 			AudioProcessingLatency: NewLatencyHistogram(),
+			GeminiLatency:         NewLatencyHistogram(),
+			MCPLatency:            NewLatencyHistogram(),
 		},
 	}
 }
@@ -212,6 +228,24 @@ func (p *Profiler) IncrementDroppedAudioChunks() {
 	atomic.AddInt64(&p.metrics.DroppedAudioChunks, 1)
 }
 
+// RecordGeminiRequest records a Gemini API request
+func (p *Profiler) RecordGeminiRequest(duration time.Duration, success bool) {
+	atomic.AddInt64(&p.metrics.GeminiRequests, 1)
+	if !success {
+		atomic.AddInt64(&p.metrics.GeminiErrors, 1)
+	}
+	p.metrics.GeminiLatency.Record(duration)
+}
+
+// RecordMCPCall records an MCP function call
+func (p *Profiler) RecordMCPCall(duration time.Duration, success bool) {
+	atomic.AddInt64(&p.metrics.MCPCalls, 1)
+	if !success {
+		atomic.AddInt64(&p.metrics.MCPErrors, 1)
+	}
+	p.metrics.MCPLatency.Record(duration)
+}
+
 // collectSystemMetrics collects system-level metrics
 func (p *Profiler) collectSystemMetrics() {
 	ticker := time.NewTicker(5 * time.Second)
@@ -275,6 +309,23 @@ func (p *Profiler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP gc_pause_time_ns Total GC pause time in nanoseconds\n")
 	fmt.Fprintf(w, "# TYPE gc_pause_time_ns gauge\n")
 	fmt.Fprintf(w, "gc_pause_time_ns %d\n", p.metrics.GCPauseTime.Nanoseconds())
+	
+	// AI Engine metrics
+	fmt.Fprintf(w, "# HELP gemini_requests_total Total Gemini API requests\n")
+	fmt.Fprintf(w, "# TYPE gemini_requests_total counter\n")
+	fmt.Fprintf(w, "gemini_requests_total %d\n", atomic.LoadInt64(&p.metrics.GeminiRequests))
+	
+	fmt.Fprintf(w, "# HELP gemini_errors_total Total Gemini API errors\n")
+	fmt.Fprintf(w, "# TYPE gemini_errors_total counter\n")
+	fmt.Fprintf(w, "gemini_errors_total %d\n", atomic.LoadInt64(&p.metrics.GeminiErrors))
+	
+	fmt.Fprintf(w, "# HELP mcp_calls_total Total MCP function calls\n")
+	fmt.Fprintf(w, "# TYPE mcp_calls_total counter\n")
+	fmt.Fprintf(w, "mcp_calls_total %d\n", atomic.LoadInt64(&p.metrics.MCPCalls))
+	
+	fmt.Fprintf(w, "# HELP mcp_errors_total Total MCP function errors\n")
+	fmt.Fprintf(w, "# TYPE mcp_errors_total counter\n")
+	fmt.Fprintf(w, "mcp_errors_total %d\n", atomic.LoadInt64(&p.metrics.MCPErrors))
 }
 
 // handlePerformanceReport returns detailed performance report
@@ -303,6 +354,14 @@ func (p *Profiler) handlePerformanceReport(w http.ResponseWriter, r *http.Reques
 			DroppedChunks:   atomic.LoadInt64(&p.metrics.DroppedAudioChunks),
 			ProcessingLatency: p.metrics.AudioProcessingLatency.GetPercentiles(),
 		},
+		AI: AIMetrics{
+			GeminiRequests: atomic.LoadInt64(&p.metrics.GeminiRequests),
+			GeminiErrors:   atomic.LoadInt64(&p.metrics.GeminiErrors),
+			GeminiLatency:  p.metrics.GeminiLatency.GetPercentiles(),
+			MCPCalls:       atomic.LoadInt64(&p.metrics.MCPCalls),
+			MCPErrors:      atomic.LoadInt64(&p.metrics.MCPErrors),
+			MCPLatency:     p.metrics.MCPLatency.GetPercentiles(),
+		},
 		System: SystemMetrics{
 			CPUUsage:    p.metrics.CPUUsage,
 			MemoryUsage: p.metrics.MemoryUsage,
@@ -320,6 +379,7 @@ type PerformanceReport struct {
 	Handler   HandlerMetrics   `json:"handler"`
 	RPC       RPCMetrics       `json:"rpc"`
 	Audio     AudioMetrics     `json:"audio"`
+	AI        AIMetrics        `json:"ai"`
 	System    SystemMetrics    `json:"system"`
 }
 
@@ -345,6 +405,15 @@ type AudioMetrics struct {
 	ChunksProcessed   int64              `json:"chunks_processed"`
 	DroppedChunks     int64              `json:"dropped_chunks"`
 	ProcessingLatency LatencyPercentiles `json:"processing_latency"`
+}
+
+type AIMetrics struct {
+	GeminiRequests int64              `json:"gemini_requests"`
+	GeminiErrors   int64              `json:"gemini_errors"`
+	GeminiLatency  LatencyPercentiles `json:"gemini_latency"`
+	MCPCalls       int64              `json:"mcp_calls"`
+	MCPErrors      int64              `json:"mcp_errors"`
+	MCPLatency     LatencyPercentiles `json:"mcp_latency"`
 }
 
 type SystemMetrics struct {

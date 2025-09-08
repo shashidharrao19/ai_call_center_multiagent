@@ -5,6 +5,8 @@ import (
 	"ai-call-center/backend/internal/optimization"
 	"ai-call-center/backend/internal/session"
 	"ai-call-center/backend/internal/websocket"
+	"ai-call-center/backend/internal/conversation"
+	"ai-call-center/backend/internal/profiling"
 	"ai-call-center/backend/pkg/models"
 	"encoding/json"
 	"net/http"
@@ -22,16 +24,18 @@ type Gateway struct {
 	sessionMgr *session.Manager
 	profiler   *profiling.Profiler
 	optimizer  *optimization.OptimizationManager
+	conversationManager *conversation.Manager
 }
 
 // NewGateway creates a new gateway instance
-func NewGateway(hub *websocket.Hub, cfg *config.Config, profiler *profiling.Profiler) *Gateway {
+func NewGateway(hub *websocket.Hub, cfg *config.Config, profiler *profiling.Profiler, conversationManager *conversation.Manager) *Gateway {
 	return &Gateway{
 		hub:        hub,
 		config:     cfg,
 		sessionMgr: session.NewManager(cfg),
 		profiler:   profiler,
 		optimizer:  optimization.NewOptimizationManager(cfg),
+		conversationManager: conversationManager,
 	}
 }
 
@@ -223,26 +227,49 @@ func (g *Gateway) GetOptimizationMetrics() *optimization.OptimizationMetrics {
 
 // handleAudioMessage processes audio messages
 func (g *Gateway) handleAudioMessage(sess *models.Session, message models.Message) {
-	// Forward audio to AI engine
-	if err := g.sessionMgr.ForwardToAI(sess.ID, message); err != nil {
-		logrus.Errorf("Failed to forward audio to AI: %v", err)
+	// Process audio through conversation manager
+	req := conversation.ProcessRequest{
+		SessionID:   sess.ID,
+		MessageType: "audio",
+		Data:        message.Data.(map[string]interface{}),
+		AudioConfig: map[string]interface{}{
+			"sample_rate": g.config.AudioSampleRate,
+			"channels":    g.config.AudioChannels,
+			"format":      g.config.AudioFormat,
+		},
+	}
+
+	response, err := g.conversationManager.ProcessMessage(req)
+	if err != nil {
+		logrus.Errorf("Failed to process audio: %v", err)
 		g.sendError(sess, "Failed to process audio")
 		return
 	}
 
-	logrus.Debugf("Audio message forwarded to AI for session %s", sess.ID)
+	// Send response back to client
+	g.sendResponse(sess, response)
+	logrus.Debugf("Audio message processed for session %s", sess.ID)
 }
 
 // handleTextMessage processes text messages
 func (g *Gateway) handleTextMessage(sess *models.Session, message models.Message) {
-	// Forward text to AI engine
-	if err := g.sessionMgr.ForwardToAI(sess.ID, message); err != nil {
-		logrus.Errorf("Failed to forward text to AI: %v", err)
+	// Process text through conversation manager
+	req := conversation.ProcessRequest{
+		SessionID:   sess.ID,
+		MessageType: "text",
+		Data:        message.Data.(map[string]interface{}),
+	}
+
+	response, err := g.conversationManager.ProcessMessage(req)
+	if err != nil {
+		logrus.Errorf("Failed to process text: %v", err)
 		g.sendError(sess, "Failed to process text")
 		return
 	}
 
-	logrus.Debugf("Text message forwarded to AI for session %s", sess.ID)
+	// Send response back to client
+	g.sendResponse(sess, response)
+	logrus.Debugf("Text message processed for session %s", sess.ID)
 }
 
 // handleControlMessage processes control messages
@@ -271,6 +298,26 @@ func (g *Gateway) handleControlMessage(sess *models.Session, message models.Mess
 		logrus.Infof("Call paused for session %s", sess.ID)
 	default:
 		logrus.Warnf("Unknown control action: %s", action)
+	}
+}
+
+// sendResponse sends a response message to the client
+func (g *Gateway) sendResponse(sess *models.Session, response *conversation.ProcessResponse) {
+	message := models.Message{
+		Type:      models.MessageTypeFromString(response.MessageType),
+		SessionID: sess.ID,
+		Data:      response.Data,
+		Timestamp: time.Now(),
+	}
+
+	data, err := json.Marshal(message)
+	if err != nil {
+		logrus.Errorf("Failed to marshal response message: %v", err)
+		return
+	}
+
+	if err := sess.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		logrus.Errorf("Failed to send response message: %v", err)
 	}
 }
 
